@@ -9,6 +9,7 @@ from flask_cors import CORS
 from utils import APIException, generate_sitemap
 from admin import setup_admin
 from models import db, User, People, Planets, Favorite_people, Favorite_planets
+from datetime import datetime
 # from models import Person
 
 app = Flask(__name__)
@@ -103,13 +104,39 @@ def people_list():
     return jsonify(response_body), 200
 
 
+@app.route('/people', methods=['POST'])
+def create_person():
+    body = request.get_json()
+
+    if not body or "name" not in body:
+        return jsonify({"msg": "El nombre del personaje es obligatorio"}), 400
+
+    person_exists = People.query.filter_by(name=body['name']).first()
+    if person_exists:
+        return jsonify({"msg": "Este personaje ya está registrado"}), 400
+
+    new_person = People()
+    new_person.name = body.get("name"),
+    new_person.height = body.get("height"),
+    new_person.mass = body.get("mass"),
+    new_person.hair_color = body.get("hair_color"),
+    new_person.skin_color = body.get("skin_color"),
+    new_person.eye_color = body.get("eye_color"),
+    new_person.birth_year = body.get("birth_year"),
+    new_person.gender = body.get("gender")
+
+    db.session.add(new_person)
+    db.session.commit()
+    return jsonify(new_person.serialize()), 201
+
+
 @app.route('/people/<int:people_id>', methods=['GET'])
 def people(people_id):
-    people = User.query.get(people_id)
+    people = People.query.get(people_id)
     if people is None:
         return jsonify({"msg": "Personaje no encontrado"}), 404
 
-    people_exist = User.query.filter_by(id=people_id).first()
+    people_exist = People.query.filter_by(id=people_id).first()
     response_body = {
         "personajes": people_exist
     }
@@ -162,6 +189,143 @@ def create_planet():
     db.session.add(new_planet)
     db.session.commit()
     return jsonify(new_planet.serialize()), 201
+
+
+@app.route('/<int:user_id>/favoritePlanet/<int:planet_id>', methods=['POST'])
+# <-- Los nombres deben coincidir con la ruta
+def create_favorite_planet(user_id, planet_id):
+    # 1. Validar si el usuario existe
+    user_exist = User.query.get(user_id)
+    if not user_exist:
+        # 404 es más preciso para "Not Found"
+        return jsonify({'msg': 'No se pudo encontrar ningún usuario'}), 404
+
+    # 2. Validar si el planeta existe
+    planet_exists = Planets.query.get(planet_id)
+    if not planet_exists:
+        return jsonify({"msg": "Este planeta no está registrado"}), 404
+    
+    # 3. Validar si ya es favorito (Evitar duplicados)
+    already_exist = Favorite_planets.query.filter_by(
+        user_id=user_id,
+        planet_id=planet_id
+    ).first()
+
+    if already_exist:
+        # 400 o 409 (Conflict) es mejor que 405
+        return jsonify({"msg": "Este planeta ya está en tus favoritos"}), 400
+
+    # 4. Crear el nuevo registro
+    new_favorite_planet = Favorite_planets()
+    new_favorite_planet.user_id = user_id
+    new_favorite_planet.planet_id = planet_id
+    new_favorite_planet.added_date = datetime.now()
+
+    try:
+        db.session.add(new_favorite_planet)
+        db.session.commit()
+        return jsonify(new_favorite_planet.serialize()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"msg": "Error interno del servidor"}), 500
+    
+@app.route('/<int:user_id>/favoritePlanet/<int:planet_id>', methods=['DELETE'])
+# <-- Los nombres deben coincidir con la ruta
+def delete_favorite_planet(user_id, planet_id):
+    # 1. Validar si el usuario existe
+    user_exist = User.query.get(user_id)
+    if not user_exist:
+        # 404 es más preciso para "Not Found"
+        return jsonify({'msg': 'No se pudo encontrar ningún usuario'}), 404
+
+    # 2. Validar si el planeta existe
+    planet_exists = Planets.query.get(planet_id)
+    if not planet_exists:
+        return jsonify({"msg": "Este planeta no está registrado"}), 404
+
+    # 3. Validar si ya es favorito (Evitar duplicados)
+    already_exist = Favorite_planets.query.filter_by(
+        user_id=user_id,
+        planet_id=planet_id
+    ).first()
+
+    if not already_exist:
+        # 400 o 409 (Conflict) es mejor que 405
+        return jsonify({"msg": "Este planeta ya está en tus favoritos"}), 400
+    try:
+        db.session.delete(already_exist)
+        db.session.commit()
+        return jsonify({"msg": f"favorito {already_exist} eliminado"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"msg": "Error interno del servidor"}), 500
+
+
+@app.route('/<int:user_id>/favoritePeople/<int:people_id>', methods=['POST'])
+# <-- Los nombres deben coincidir con la ruta
+def create_favorite_people(user_id, people_id):
+    # 1. Validar si el usuario existe
+    user_exist = User.query.get(user_id)
+    if not user_exist:
+        # 404 es más preciso para "Not Found"
+        return jsonify({'msg': 'No se pudo encontrar ningún usuario'}), 404
+
+    # 2. Validar si el planeta existe
+    people_exists = People.query.get(people_id)
+    if not people_exists:
+        return jsonify({"msg": "Este personaje no está registrado"}), 404
+
+    # 3. Validar si ya es favorito (Evitar duplicados)
+    already_exist = Favorite_people.query.filter_by(
+        user_id=user_id,
+        people_id=people_id
+    ).first()
+
+    if already_exist:
+        # 400 o 409 (Conflict) es mejor que 405
+        return jsonify({"msg": "Este personaje ya está en tus favoritos"}), 400
+
+    # 4. Crear el nuevo registro
+    new_favorite_people = Favorite_people()
+    new_favorite_people.user_id = user_id
+    new_favorite_people.people_id = people_id
+    new_favorite_people.added_date = datetime.now()
+
+    db.session.add(new_favorite_people)
+    db.session.commit()
+    return jsonify(new_favorite_people.serialize()), 201
+
+
+@app.route('/<int:user_id>/favoritePeople/<int:people_id>', methods=['DELETE'])
+# <-- Los nombres deben coincidir con la ruta
+def delete_favorite_people(user_id, people_id):
+    # 1. Validar si el usuario existe
+    user_exist = User.query.get(user_id)
+    if not user_exist:
+        # 404 es más preciso para "Not Found"
+        return jsonify({'msg': 'No se pudo encontrar ningún usuario'}), 404
+
+    # 2. Validar si el planeta existe
+    people_exists = People.query.get(people_id)
+    if not people_exists:
+        return jsonify({"msg": "Este planeta no está registrado"}), 404
+
+    # 3. Validar si ya es favorito (Evitar duplicados)
+    already_exist = Favorite_people.query.filter_by(
+        user_id=user_id,
+        people_id=people_id
+    ).first()
+
+    if not already_exist:
+        # 400 o 409 (Conflict) es mejor que 405
+        return jsonify({"msg": "Este planeta ya está en tus favoritos"}), 400
+    try:
+        db.session.delete(already_exist)
+        db.session.commit()
+        return jsonify({"msg": f"favorito {already_exist} eliminado"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"msg": "Error interno del servidor"}), 500
 
 
 @app.route('/user/<int:user_id>/favorites', methods=['GET'])
